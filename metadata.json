@@ -1,0 +1,8 @@
+{
+  "name": "UGC Genius AI",
+  "description": "An advanced UGC content planning tool that analyzes marketplace products (Shopee, Tokopedia, Amazon), generates viral video scripts in JSON format, and creates high-quality AI cover images.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
