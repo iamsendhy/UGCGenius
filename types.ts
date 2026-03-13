@@ -38,6 +38,7 @@ export enum AspectRatio {
 export interface AppState {
   step: 'input' | 'analysis' | 'prompt' | 'image';
   url: string;
+  apiKey: string;
   campaignGoal: CampaignGoal;
   platform: TargetPlatform;
   duration: VideoDuration;

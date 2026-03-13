@@ -1,12 +1,37 @@
 
 import React, { useState } from 'react';
 import { AppState, AspectRatio, VoiceStyle, CampaignGoal, TargetPlatform, VideoDuration } from './types';
-import { analyzeProduct, generateUGCPrompt, generateCoverImage } from './services/geminiService';
+import { analyzeProduct, generateUGCPrompt, generateCoverImage, testConnection } from './services/geminiService';
 
 const App: React.FC = () => {
+  // Helper to format any error into a readable string
+  const formatError = (err: any): string => {
+    if (!err) return 'Unknown error';
+    if (typeof err === 'string') return err;
+    if (err instanceof Error) {
+      return `${err.name}: ${err.message}\n${err.stack || ''}`;
+    }
+    try {
+      const stringified = JSON.stringify(err, null, 2);
+      if (stringified === '{}') {
+        return `Error object details: ${err.message || 'No message'} (Keys: ${Object.keys(err).join(', ')})`;
+      }
+      return stringified;
+    } catch {
+      return String(err);
+    }
+  };
+
   const [state, setState] = useState<AppState>({
     step: 'input',
     url: '',
+    apiKey: (() => {
+      const envKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (envKey && envKey !== 'your_api_key_here' && envKey.startsWith('AIza')) {
+        return envKey;
+      }
+      return localStorage.getItem('gemini_api_key') || '';
+    })(),
     campaignGoal: 'unboxing',
     platform: 'tiktok',
     duration: '30s',
@@ -16,55 +41,165 @@ const App: React.FC = () => {
   });
 
   const [copied, setCopied] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>(AspectRatio.RATIO_9_16);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
+  const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
+
+  // Show toast notification
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  // Save API Key to localStorage
+  const saveApiKey = (key: string) => {
+    localStorage.setItem('gemini_api_key', key);
+    setSaveStatus('saved');
+    console.log('✅ API Key saved to localStorage:', key.substring(0, 8) + '...');
+    
+    // Show saved indicator briefly
+    setTimeout(() => setSaveStatus('idle'), 3000);
+  };
+
+  React.useEffect(() => {
+    const savedKey = localStorage.getItem('gemini_api_key');
+    if (savedKey) {
+      console.log('📝 Loaded API Key from localStorage:', savedKey.substring(0, 8) + '...');
+    }
+  }, []);
+
+  const testApiKey = async () => {
+    if (!state.apiKey) {
+      setApiError('API Key is empty. Please enter your Gemini API Key.');
+      return;
+    }
+    
+    const trimmedApiKey = state.apiKey.trim();
+    setConnectionStatus('testing');
+    setApiError(null);
+    
+    try {
+      console.log('Testing connection...');
+      const result = await testConnection(trimmedApiKey);
+      setConnectionStatus(result ? 'success' : 'failed');
+      if (!result) {
+        setApiError('Connection failed. Key might be invalid or model not available.');
+      }
+    } catch (err: any) {
+      console.error('Connection Test Failed:', err);
+      setConnectionStatus('failed');
+      setApiError(formatError(err));
+    }
+  };
 
   const startAnalysis = async () => {
     if (!state.url) {
       setState(prev => ({ ...prev, error: 'Silakan masukkan URL produk.' }));
       return;
     }
+    if (!state.apiKey) {
+      setState(prev => ({ ...prev, error: 'Silakan masukkan Gemini API Key.' }));
+      return;
+    }
+    
+    const trimmedApiKey = state.apiKey.trim();
+    setApiError(null);
     setState(prev => ({ ...prev, loading: true, error: undefined }));
+    
     try {
-      const analysis = await analyzeProduct(state.url);
+      const analysis = await analyzeProduct(state.url, trimmedApiKey);
       setState(prev => ({ ...prev, analysis, step: 'analysis', loading: false }));
     } catch (err: any) {
-      setState(prev => ({ ...prev, error: `Analisis gagal: ${err.message}`, loading: false }));
+      console.error('Analysis failed:', err);
+      const errorDetail = formatError(err);
+      setApiError(errorDetail);
+      setState(prev => ({ ...prev, error: `Analisis gagal: ${err.message || 'Lihat Debug Info'}`, loading: false }));
     }
   };
 
   const createUGCPrompt = async () => {
-    if (!state.analysis) return;
+    if (!state.analysis) {
+      console.error('❌ No analysis data!');
+      return;
+    }
+    
+    console.log('🚀 Starting createUGCPrompt...');
+    console.log('📊 Analysis:', state.analysis);
+    console.log('🔑 API Key:', state.apiKey.substring(0, 8) + '...');
+    
     setState(prev => ({ ...prev, loading: true, error: undefined }));
+    
     try {
+      console.log('📡 Calling generateUGCPrompt...');
       const ugcPrompt = await generateUGCPrompt(
-        state.analysis, 
-        state.language, 
+        state.analysis,
+        state.language,
         state.voiceStyle,
         state.campaignGoal,
         state.platform,
-        state.duration
+        state.duration,
+        state.apiKey
       );
+      
+      console.log('✅ UGC Prompt generated:', ugcPrompt);
+      console.log('🎬 Setting state to prompt step...');
+      
       setState(prev => ({ ...prev, ugcPrompt, step: 'prompt', loading: false }));
+      
+      console.log('✅ State updated successfully');
     } catch (err: any) {
-      setState(prev => ({ ...prev, error: `Gagal membuat script: ${err.message}`, loading: false }));
+      console.error('❌ createUGCPrompt error:', err);
+      setApiError(formatError(err));
+      setState(prev => ({ ...prev, error: `Script gagal: ${err.message}`, loading: false }));
     }
   };
 
   const createCover = async () => {
-    if (!state.ugcPrompt || !state.analysis) return;
+    if (!state.ugcPrompt || !state.analysis) {
+      showToast('❌ Missing script data!', 'error');
+      return;
+    }
+    
+    console.log('🎨 Starting createCover...');
     setState(prev => ({ ...prev, loading: true, error: undefined }));
+    
     try {
-      const coverImage = await generateCoverImage(
-        state.ugcPrompt, 
-        state.analysis, 
-        aspectRatio, 
-        state.referenceImage, 
+      // generateCoverImage akan throw error dengan image prompt
+      await generateCoverImage(
+        state.ugcPrompt,
+        state.analysis,
+        aspectRatio,
+        state.referenceImage,
         state.characterImage,
-        state.coverInstruction
+        state.coverInstruction,
+        state.apiKey
       );
-      setState(prev => ({ ...prev, coverImage, step: 'image', loading: false }));
     } catch (err: any) {
-      setState(prev => ({ ...prev, error: `Gagal membuat gambar: ${err.message}`, loading: false }));
+      // Extract image prompt dari error message
+      const errorMessage = err.message;
+      const promptMatch = errorMessage.match(/Use this prompt with.*?:\n\n([\s\S]+)/);
+      
+      if (promptMatch) {
+        const imagePrompt = promptMatch[1];
+        // Copy prompt ke clipboard
+        navigator.clipboard.writeText(imagePrompt);
+        showToast('📋 Image prompt copied! Use with Midjourney/DALL-E', 'success');
+        
+        // Set prompt sebagai "cover image" untuk ditampilkan
+        setState(prev => ({ 
+          ...prev, 
+          coverImage: null,
+          coverInstruction: imagePrompt, // Store prompt
+          loading: false 
+        }));
+      } else {
+        console.error('❌ createCover error:', err);
+        showToast(`❌ ${err.message}`, 'error');
+        setState(prev => ({ ...prev, loading: false, error: err.message }));
+      }
     }
   };
 
@@ -72,13 +207,23 @@ const App: React.FC = () => {
     setState({
       step: 'input',
       url: '',
+      apiKey: localStorage.getItem('gemini_api_key') || process.env.VITE_GEMINI_API_KEY || '',
       campaignGoal: 'unboxing',
       platform: 'tiktok',
       duration: '30s',
       voiceStyle: 'casual',
       language: 'id',
-      loading: false
+      loading: false,
+      analysis: undefined,
+      ugcPrompt: undefined,
+      coverImage: undefined,
+      coverInstruction: undefined,
+      referenceImage: undefined,
+      characterImage: undefined
     });
+    setApiError(null);
+    setConnectionStatus('idle');
+    setToast(null);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, key: 'referenceImage' | 'characterImage') => {
@@ -94,8 +239,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen pb-20 bg-slate-950 text-slate-100 selection:bg-indigo-500/30">
-      {/* Navigation */}
+    <div className="min-h-screen pb-20 bg-slate-950 text-slate-100 selection:bg-indigo-500/30 font-sans">
       <nav className="p-4 border-b border-white/5 glass sticky top-0 z-50 flex justify-between items-center backdrop-blur-xl">
         <div className="flex items-center gap-3 cursor-pointer group" onClick={reset}>
           <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
@@ -103,24 +247,33 @@ const App: React.FC = () => {
           </div>
           <h1 className="text-lg font-black tracking-tighter gradient-text">UGC GENIUS 2.0</h1>
         </div>
-        
-        <div className="hidden sm:flex items-center gap-2">
-          {['input', 'analysis', 'prompt', 'image'].map((s, idx) => (
-            <React.Fragment key={s}>
-              <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border ${state.step === s ? 'bg-indigo-600 border-indigo-400 text-white' : 'border-white/10 text-slate-500'}`}>
-                {idx + 1}. {s}
-              </div>
-              {idx < 3 && <div className="w-4 h-px bg-white/10"></div>}
-            </React.Fragment>
-          ))}
-        </div>
       </nav>
 
       <main className="max-w-4xl mx-auto px-6 pt-10">
         {state.error && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 flex items-center gap-3 text-sm animate-shake">
-            <i className="fas fa-circle-exclamation"></i>
-            {state.error}
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 flex items-start gap-3 text-sm animate-shake">
+            <i className="fas fa-circle-exclamation mt-0.5"></i>
+            <span className="flex-1 whitespace-pre-line">{state.error}</span>
+          </div>
+        )}
+
+        {apiError && (
+          <div className="mb-6 animate-in fade-in slide-in-from-top-2 duration-300">
+            <div className="p-5 bg-slate-900 border border-red-500/30 rounded-2xl shadow-2xl overflow-hidden">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-red-500">TECHNICAL DEBUG INFO</h3>
+                <button onClick={() => setApiError(null)} className="text-slate-500 hover:text-white transition-colors">
+                  <i className="fas fa-times"></i>
+                </button>
+              </div>
+              <pre className="text-xs font-mono text-red-400/90 whitespace-pre-wrap leading-relaxed max-h-[300px] overflow-y-auto custom-scrollbar bg-black/20 p-4 rounded-xl">
+                {apiError}
+              </pre>
+              <div className="mt-4 pt-4 border-t border-white/5 flex gap-4">
+                 <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-indigo-400 hover:underline">CHECK GOOGLE AI STUDIO</a>
+                 <button onClick={testApiKey} className="text-[10px] font-bold text-slate-400 hover:text-white underline">RE-TEST CONNECTION</button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -135,13 +288,104 @@ const App: React.FC = () => {
 
             <div className="glass p-8 rounded-3xl space-y-8 shadow-2xl shadow-indigo-500/5 border-white/10">
               <div className="space-y-3">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Gemini API Key</label>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-4 flex items-center text-slate-500 group-focus-within:text-indigo-400 transition-colors">
+                    <i className="fas fa-key"></i>
+                  </div>
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={state.apiKey}
+                    onChange={(e) => {
+                      const newKey = e.target.value;
+                      setState(prev => ({ ...prev, apiKey: newKey }));
+                      // Auto-save to localStorage when user types valid key
+                      if (newKey.length > 20 && newKey.startsWith('AIza')) {
+                        saveApiKey(newKey);
+                      }
+                    }}
+                    placeholder="Enter your Gemini API Key..."
+                    className="w-full bg-slate-900/50 border border-white/10 rounded-2xl pl-12 pr-12 py-5 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-slate-600 font-medium"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="absolute inset-y-0 right-4 flex items-center text-slate-500 hover:text-indigo-400 transition-colors"
+                  >
+                    <i className={`fas ${showApiKey ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                  </button>
+                </div>
+                
+                <div className="flex flex-wrap items-center justify-between gap-4 text-xs ml-1">
+                  <p className="text-slate-500">
+                    Get your key at{' '}
+                    <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">
+                      Google AI Studio
+                    </a>
+                  </p>
+                  
+                  {state.apiKey && (
+                    <div className="flex items-center gap-3">
+                      <span className={`font-mono px-2 py-1 rounded bg-white/5 ${state.apiKey.trim().startsWith('AIza') ? 'text-green-500' : 'text-red-400'}`}>
+                        {state.apiKey.substring(0, 8)}...{state.apiKey.substring(state.apiKey.length - 4)}
+                      </span>
+                      {saveStatus === 'saved' && (
+                        <span className="text-xs text-green-400 flex items-center gap-1">
+                          <i className="fas fa-check"></i> Saved locally!
+                        </span>
+                      )}
+                      {saveStatus === 'error' && (
+                        <span className="text-xs text-red-400 flex items-center gap-1" title="Saved to localStorage only">
+                          <i className="fas fa-info-circle"></i> Local storage
+                        </span>
+                      )}
+                      <button
+                        onClick={() => {
+                          const confirmed = confirm(`Save API Key to .env file?\n\nKey: ${state.apiKey.substring(0, 8)}...${state.apiKey.substring(state.apiKey.length - 4)}\n\nThis will update the .env file so the key persists across browser sessions and can be shared with team members.`);
+                          if (confirmed) {
+                            // Copy to clipboard and show instructions
+                            navigator.clipboard.writeText(state.apiKey);
+                            alert(`✅ API Key copied to clipboard!\n\nNow run this command to save to .env:\n\nnode scripts/update-env.js\n\nOr manually paste into .env file:\nVITE_GEMINI_API_KEY=${state.apiKey}`);
+                          }
+                        }}
+                        className="text-xs bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 text-indigo-400 px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-2"
+                      >
+                        <i className="fas fa-floppy-disk"></i>
+                        Save to .env
+                      </button>
+                      <button
+                        onClick={testApiKey}
+                        disabled={connectionStatus === 'testing'}
+                        className={`font-bold flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${
+                          connectionStatus === 'success' ? 'bg-green-500/10 border-green-500/20 text-green-400' :
+                          connectionStatus === 'failed' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
+                          'bg-indigo-500/10 border-indigo-500/20 text-indigo-400 hover:bg-indigo-500/20'
+                        }`}
+                      >
+                        <i className={`fas ${
+                          connectionStatus === 'testing' ? 'fa-spinner fa-spin' :
+                          connectionStatus === 'success' ? 'fa-check-circle' :
+                          connectionStatus === 'failed' ? 'fa-circle-xmark' :
+                          'fa-plug'
+                        }`}></i>
+                        {connectionStatus === 'testing' ? 'Testing...' :
+                         connectionStatus === 'success' ? 'Connected!' :
+                         connectionStatus === 'failed' ? 'Failed' :
+                         'Test Connection'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-3">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Marketplace Link</label>
                 <div className="relative group">
                   <div className="absolute inset-y-0 left-4 flex items-center text-slate-500 group-focus-within:text-indigo-400 transition-colors">
                     <i className="fas fa-link"></i>
                   </div>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={state.url}
                     onChange={(e) => setState(prev => ({ ...prev, url: e.target.value }))}
                     placeholder="Paste Tokopedia, Shopee, or Amazon URL..."
@@ -150,43 +394,12 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div className="space-y-3">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Campaign Goal</label>
-                  <select 
-                    value={state.campaignGoal}
-                    onChange={(e) => setState(prev => ({ ...prev, campaignGoal: e.target.value as CampaignGoal }))}
-                    className="w-full bg-slate-900 border border-white/10 rounded-2xl px-5 py-4 outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none font-medium"
-                  >
-                    <option value="unboxing">Unboxing Experience</option>
-                    <option value="problem_solution">Problem & Solution</option>
-                    <option value="lifestyle">Aesthetic Lifestyle</option>
-                    <option value="hard_sell">Hard Sell / Promo</option>
-                  </select>
-                </div>
-
-                <div className="space-y-3">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Target Platform</label>
-                  <div className="flex gap-2 p-1 bg-slate-900 border border-white/10 rounded-2xl">
-                    {(['tiktok', 'reels', 'shorts'] as TargetPlatform[]).map(p => (
-                      <button 
-                        key={p}
-                        onClick={() => setState(prev => ({ ...prev, platform: p }))}
-                        className={`flex-1 py-3 rounded-xl text-xs font-bold uppercase transition-all ${state.platform === p ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
               <button 
                 onClick={startAnalysis}
                 disabled={state.loading}
                 className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-5 rounded-2xl transition-all shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-3 text-lg"
               >
-                {state.loading ? <><i className="fas fa-atom fa-spin"></i> Researching Product...</> : <><i className="fas fa-wand-magic-sparkles"></i> Generate AI Insight</>}
+                {state.loading ? <><i className="fas fa-atom fa-spin"></i> Researching...</> : <><i className="fas fa-wand-magic-sparkles"></i> Generate AI Insight</>}
               </button>
             </div>
           </div>
@@ -221,57 +434,13 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="glass p-8 rounded-3xl space-y-8">
-              <h3 className="text-xl font-bold flex items-center gap-3">
-                <span className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 text-sm">2</span>
-                Finalize Script Settings
-              </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                <div className="space-y-3">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Script Language</label>
-                  <div className="flex gap-2">
-                    <button onClick={() => setState(prev => ({ ...prev, language: 'id' }))} className={`flex-1 py-3 rounded-xl border text-xs font-bold transition-all ${state.language === 'id' ? 'bg-indigo-600 border-indigo-400' : 'border-white/10 text-slate-500'}`}>ID</button>
-                    <button onClick={() => setState(prev => ({ ...prev, language: 'en' }))} className={`flex-1 py-3 rounded-xl border text-xs font-bold transition-all ${state.language === 'en' ? 'bg-indigo-600 border-indigo-400' : 'border-white/10 text-slate-500'}`}>EN</button>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Voice Tone</label>
-                  <select 
-                    value={state.voiceStyle}
-                    onChange={(e) => setState(prev => ({ ...prev, voiceStyle: e.target.value as VoiceStyle }))}
-                    className="w-full bg-slate-900 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold outline-none"
-                  >
-                    <option value="casual">Casual & Chill</option>
-                    <option value="excited">Hyper Excited</option>
-                    <option value="professional">Serious / Pro</option>
-                    <option value="humorous">Funny / Wit</option>
-                  </select>
-                </div>
-
-                <div className="space-y-3">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Video Duration</label>
-                  <select 
-                    value={state.duration}
-                    onChange={(e) => setState(prev => ({ ...prev, duration: e.target.value as VideoDuration }))}
-                    className="w-full bg-slate-900 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold outline-none"
-                  >
-                    <option value="15s">15 Seconds (Fast)</option>
-                    <option value="30s">30 Seconds (Standard)</option>
-                    <option value="60s">60 Seconds (Detailed)</option>
-                  </select>
-                </div>
-              </div>
-
-              <button 
-                onClick={createUGCPrompt}
-                disabled={state.loading}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-5 rounded-2xl transition-all shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-3"
-              >
-                {state.loading ? <><i className="fas fa-pen-nib fa-spin"></i> Writing Script...</> : <><i className="fas fa-clapperboard"></i> Generate Final Script</>}
-              </button>
-            </div>
+            <button
+              onClick={createUGCPrompt}
+              disabled={state.loading}
+              className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-5 rounded-2xl transition-all shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-3"
+            >
+              {state.loading ? <><i className="fas fa-pen-nib fa-spin"></i> Writing Script...</> : <><i className="fas fa-clapperboard"></i> Generate Final Script</>}
+            </button>
           </div>
         )}
 
@@ -279,16 +448,14 @@ const App: React.FC = () => {
           <div className="space-y-8 animate-in fade-in duration-500">
             <div className="flex justify-between items-center">
               <h2 className="text-3xl font-black tracking-tight">Your Video Blueprint</h2>
-              <button 
+              <button
                 onClick={() => {
                   navigator.clipboard.writeText(JSON.stringify(state.ugcPrompt, null, 2));
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
+                  showToast('📋 Script copied to clipboard!', 'success');
                 }}
-                className={`px-5 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-2 transition-all ${copied ? 'bg-green-600 text-white' : 'bg-white/5 border border-white/10 hover:bg-white/10 text-slate-400'}`}
+                className="px-5 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-2 bg-white/5 border border-white/10 hover:bg-white/10 transition-all hover:scale-105"
               >
-                <i className={`fas ${copied ? 'fa-check' : 'fa-copy'}`}></i>
-                {copied ? 'Copied' : 'Copy JSON'}
+                <i className="fas fa-copy"></i> Copy JSON
               </button>
             </div>
 
@@ -340,116 +507,219 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Image Customization */}
-            <div className="glass p-8 rounded-3xl space-y-8">
-               <h3 className="text-xl font-bold flex items-center gap-3">
-                <i className="fas fa-camera-retro text-indigo-400"></i>
-                Create Visual Cover
-               </h3>
-
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">Ref. Mood</label>
-                        <div className="relative aspect-video bg-slate-900 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center overflow-hidden group">
-                           <input type="file" onChange={(e) => handleFileUpload(e, 'referenceImage')} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                           {state.referenceImage ? <img src={`data:image/jpeg;base64,${state.referenceImage}`} className="w-full h-full object-cover" /> : <i className="fas fa-plus text-slate-700 group-hover:text-indigo-500 transition-colors"></i>}
-                        </div>
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">Ref. Person</label>
-                        <div className="relative aspect-video bg-slate-900 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center overflow-hidden group">
-                           <input type="file" onChange={(e) => handleFileUpload(e, 'characterImage')} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                           {state.characterImage ? <img src={`data:image/jpeg;base64,${state.characterImage}`} className="w-full h-full object-cover" /> : <i className="fas fa-plus text-slate-700 group-hover:text-indigo-500 transition-colors"></i>}
-                        </div>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">Aspect Ratio</label>
-                      <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value as AspectRatio)} className="w-full bg-slate-900 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold">
-                        {Object.values(AspectRatio).map(r => <option key={r} value={r}>{r}</option>)}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Additional AI Prompt</label>
-                    <textarea 
-                      value={state.coverInstruction || ''}
-                      onChange={(e) => setState(prev => ({ ...prev, coverInstruction: e.target.value }))}
-                      placeholder="Contoh: Berikan pencahayaan neon ungu kebiruan, fokus pada ekspresi wajah bahagia..."
-                      className="w-full h-28 bg-slate-900 border border-white/10 rounded-2xl p-4 text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none resize-none"
-                    />
-                    <button 
-                      onClick={createCover}
-                      disabled={state.loading}
-                      className="w-full bg-white text-slate-950 hover:bg-indigo-100 disabled:opacity-50 font-black py-4 rounded-2xl transition-all flex items-center justify-center gap-2"
-                    >
-                      {state.loading ? <i className="fas fa-cog fa-spin"></i> : <><i className="fas fa-magic"></i> Generate Cover</>}
-                    </button>
-                  </div>
-               </div>
+            <div className="flex gap-4">
+              <button
+                onClick={() => setState(prev => ({ ...prev, step: 'analysis' }))}
+                className="px-8 py-4 bg-white/5 hover:bg-white/10 text-white font-bold border border-white/10 rounded-2xl transition-all flex items-center justify-center gap-2"
+              >
+                <i className="fas fa-arrow-left"></i> Back to Analysis
+              </button>
+              <button
+                onClick={() => setState(prev => ({ ...prev, step: 'image' }))}
+                className="flex-1 px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl transition-all shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-2"
+              >
+                <i className="fas fa-image"></i> Generate Cover Image
+              </button>
             </div>
           </div>
         )}
 
-        {state.step === 'image' && state.coverImage && (
-          <div className="space-y-10 animate-in fade-in zoom-in duration-700 text-center py-10">
-            <div className="space-y-2">
-              <h2 className="text-4xl font-black">Your UGC Kit is Ready!</h2>
-              <p className="text-slate-400">Download the visual and start recording your content.</p>
-            </div>
-
-            <div className="relative group inline-block">
-               <div className="absolute -inset-4 bg-indigo-500/20 blur-3xl opacity-0 group-hover:opacity-100 transition-opacity"></div>
-               <img src={state.coverImage} alt="UGC Cover" className="relative w-full max-w-sm mx-auto rounded-3xl shadow-2xl border border-white/10" />
-            </div>
-
-            <div className="flex flex-col sm:flex-row justify-center gap-4">
-               <button 
-                onClick={() => {
-                  const a = document.createElement('a');
-                  a.href = state.coverImage!;
-                  a.download = `ugc-cover-${Date.now()}.png`;
-                  a.click();
-                }}
-                className="px-10 py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl transition-all shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-2"
-               >
-                 <i className="fas fa-download"></i> Save Cover
-               </button>
-               <button 
+        {state.step === 'image' && state.ugcPrompt && (
+          <div className="space-y-8 animate-in fade-in duration-500">
+            <div className="flex justify-between items-center">
+              <h2 className="text-3xl font-black tracking-tight">Generate Cover Image</h2>
+              <button
                 onClick={() => setState(prev => ({ ...prev, step: 'prompt' }))}
-                className="px-10 py-5 bg-white/5 hover:bg-white/10 text-white font-bold border border-white/10 rounded-2xl transition-all flex items-center justify-center gap-2"
-               >
-                 <i className="fas fa-pencil"></i> Adjust Script
-               </button>
+                className="text-slate-500 hover:text-white text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-2"
+              >
+                <i className="fas fa-arrow-left"></i> Back to Script
+              </button>
             </div>
 
-            <button onClick={reset} className="text-slate-500 hover:text-white text-xs font-bold uppercase tracking-widest mt-10">
-              Create New Project
-            </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Left: Settings */}
+              <div className="space-y-6">
+                {/* Reference Images */}
+                <div className="space-y-4">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Reference Images (Optional)</label>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">Mood/Style</label>
+                      <div className="relative aspect-square bg-slate-900 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center overflow-hidden group hover:border-indigo-500/50 transition-colors">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleFileUpload(e, 'referenceImage')}
+                          className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                        />
+                        {state.referenceImage ? (
+                          <img src={`data:image/jpeg;base64,${state.referenceImage}`} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="text-center p-4">
+                            <i className="fas fa-plus text-slate-700 text-2xl mb-2"></i>
+                            <p className="text-xs text-slate-600">Upload</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">Character</label>
+                      <div className="relative aspect-square bg-slate-900 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center overflow-hidden group hover:border-indigo-500/50 transition-colors">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleFileUpload(e, 'characterImage')}
+                          className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                        />
+                        {state.characterImage ? (
+                          <img src={`data:image/jpeg;base64,${state.characterImage}`} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="text-center p-4">
+                            <i className="fas fa-user text-slate-700 text-2xl mb-2"></i>
+                            <p className="text-xs text-slate-600">Upload</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Aspect Ratio */}
+                <div className="space-y-3">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Aspect Ratio</label>
+                  <div className="flex gap-2 p-1 bg-slate-900 border border-white/10 rounded-2xl">
+                    {[AspectRatio.RATIO_9_16, AspectRatio.RATIO_1_1, AspectRatio.RATIO_16_9].map((ratio) => (
+                      <button
+                        key={ratio}
+                        onClick={() => setAspectRatio(ratio)}
+                        className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${
+                          aspectRatio === ratio
+                            ? 'bg-indigo-600 text-white shadow-lg'
+                            : 'text-slate-500 hover:text-slate-300'
+                        }`}
+                      >
+                        {ratio}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Custom Prompt */}
+                <div className="space-y-3">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Additional Prompt</label>
+                  <textarea
+                    value={state.coverInstruction || ''}
+                    onChange={(e) => setState(prev => ({ ...prev, coverInstruction: e.target.value }))}
+                    placeholder="Example: Give it a purple neon glow, focus on happy facial expression, cinematic lighting..."
+                    className="w-full h-32 bg-slate-900 border border-white/10 rounded-2xl p-4 text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none resize-none"
+                  />
+                </div>
+
+                {/* Generate Button */}
+                <button
+                  onClick={createCover}
+                  disabled={state.loading}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-5 rounded-2xl transition-all shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-3"
+                >
+                  {state.loading ? (
+                    <><i className="fas fa-wand-magic-sparkles fa-spin"></i> Generating...</>
+                  ) : (
+                    <><i className="fas fa-image"></i> Generate Cover</>
+                  )}
+                </button>
+              </div>
+
+              {/* Right: Preview */}
+              <div className="space-y-4">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Preview</label>
+                
+                {state.coverInstruction && state.coverInstruction.length > 200 ? (
+                  <div className="w-full bg-slate-900 border border-white/10 rounded-3xl p-6 space-y-4">
+                    <div className="flex items-center gap-2 text-green-400">
+                      <i className="fas fa-circle-check"></i>
+                      <span className="text-sm font-bold">Image Prompt Generated!</span>
+                    </div>
+                    <div className="bg-slate-950 rounded-xl p-4 border border-white/5">
+                      <p className="text-xs text-slate-400 font-mono leading-relaxed">
+                        {state.coverInstruction}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(state.coverInstruction);
+                        showToast('📋 Prompt copied!', 'success');
+                      }}
+                      className="w-full px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all"
+                    >
+                      <i className="fas fa-copy"></i> Copy Prompt
+                    </button>
+                    <p className="text-xs text-slate-500 text-center">
+                      Use this prompt with Midjourney, DALL-E 3, or Stable Diffusion
+                    </p>
+                  </div>
+                ) : state.coverImage ? (
+                  <div className="relative group">
+                    <img
+                      src={state.coverImage}
+                      alt="Generated cover"
+                      className="w-full rounded-3xl shadow-2xl border border-white/10"
+                    />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-3xl flex items-center justify-center gap-4">
+                      <button
+                        onClick={() => {
+                          const a = document.createElement('a');
+                          a.href = state.coverImage!;
+                          a.download = `ugc-cover-${Date.now()}.png`;
+                          a.click();
+                          showToast('📥 Image downloaded!', 'success');
+                        }}
+                        className="px-6 py-3 bg-white text-slate-900 rounded-xl font-bold flex items-center gap-2 hover:scale-105 transition-transform"
+                      >
+                        <i className="fas fa-download"></i> Download
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full aspect-[9/16] bg-slate-900 border-2 border-dashed border-white/10 rounded-3xl flex flex-col items-center justify-center text-slate-600">
+                    <i className="fas fa-image text-6xl mb-4"></i>
+                    <p className="text-sm">Generated image will appear here</p>
+                  </div>
+                )}
+
+                {/* Info */}
+                <div className="glass p-4 rounded-2xl space-y-2">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Tips</p>
+                  <ul className="text-xs text-slate-400 space-y-1">
+                    <li>• Upload reference images for better results</li>
+                    <li>• Use 9:16 for TikTok/Reels</li>
+                    <li>• Add specific prompts for style</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </main>
 
-      {/* Progress Footer */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
-        <div className="bg-slate-900/80 backdrop-blur-2xl border border-white/10 px-6 py-4 rounded-full flex items-center gap-6 shadow-2xl">
-          <div className="flex items-center gap-3">
-             <div className={`w-2.5 h-2.5 rounded-full ${state.loading ? 'bg-amber-500 animate-pulse' : 'bg-green-500'}`}></div>
-             <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-               {state.loading ? 'AI Processing...' : 'Ready to work'}
-             </span>
-          </div>
-          <div className="h-4 w-px bg-white/10"></div>
-          <div className="flex gap-4 text-slate-500 text-xs">
-             <i className="fab fa-tiktok"></i>
-             <i className="fab fa-instagram"></i>
-             <i className="fab fa-youtube"></i>
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className={`px-6 py-4 rounded-2xl shadow-2xl backdrop-blur-xl border flex items-center gap-3 ${
+            toast.type === 'success' ? 'bg-green-500/90 border-green-400/30 text-white' :
+            toast.type === 'error' ? 'bg-red-500/90 border-red-400/30 text-white' :
+            'bg-indigo-500/90 border-indigo-400/30 text-white'
+          }`}>
+            <i className={`fas ${
+              toast.type === 'success' ? 'fa-circle-check' :
+              toast.type === 'error' ? 'fa-circle-exclamation' :
+              'fa-circle-info'
+            } text-lg`}></i>
+            <span className="font-bold text-sm">{toast.message}</span>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
