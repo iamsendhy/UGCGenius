@@ -25,13 +25,7 @@ const App: React.FC = () => {
   const [state, setState] = useState<AppState>({
     step: 'input',
     url: '',
-    apiKey: (() => {
-      const envKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (envKey && envKey !== 'your_api_key_here' && envKey.startsWith('AIza')) {
-        return envKey;
-      }
-      return localStorage.getItem('gemini_api_key') || '';
-    })(),
+    apiKey: localStorage.getItem('gemini_api_key') || '',
     campaignGoal: 'unboxing',
     platform: 'tiktok',
     duration: '30s',
@@ -207,7 +201,7 @@ const App: React.FC = () => {
     setState({
       step: 'input',
       url: '',
-      apiKey: localStorage.getItem('gemini_api_key') || process.env.VITE_GEMINI_API_KEY || '',
+      apiKey: localStorage.getItem('gemini_api_key') || '',
       campaignGoal: 'unboxing',
       platform: 'tiktok',
       duration: '30s',
@@ -270,7 +264,7 @@ const App: React.FC = () => {
                 {apiError}
               </pre>
               <div className="mt-4 pt-4 border-t border-white/5 flex gap-4">
-                 <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-indigo-400 hover:underline">CHECK GOOGLE AI STUDIO</a>
+                 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-indigo-400 hover:underline">GET API KEY</a>
                  <button onClick={testApiKey} className="text-[10px] font-bold text-slate-400 hover:text-white underline">RE-TEST CONNECTION</button>
               </div>
             </div>
