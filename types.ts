@@ -3,6 +3,7 @@ export type CampaignGoal = 'unboxing' | 'problem_solution' | 'lifestyle' | 'hard
 export type TargetPlatform = 'tiktok' | 'reels' | 'shorts';
 export type VideoDuration = '15s' | '30s' | '60s';
 export type VoiceStyle = 'casual' | 'professional' | 'excited' | 'humorous';
+export type ScriptStyle = 'pain_killer' | 'skeptic_disarmer' | 'social_proof' | 'bold_promise' | 'redemption_story';
 
 export interface ProductAnalysis {
   name: string;
@@ -43,6 +44,7 @@ export interface AppState {
   platform: TargetPlatform;
   duration: VideoDuration;
   voiceStyle: VoiceStyle;
+  scriptStyle: ScriptStyle;
   language: 'en' | 'id';
   analysis?: ProductAnalysis;
   ugcPrompt?: UGCPrompt;

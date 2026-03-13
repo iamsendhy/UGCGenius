@@ -30,6 +30,7 @@ const App: React.FC = () => {
     platform: 'tiktok',
     duration: '30s',
     voiceStyle: 'casual',
+    scriptStyle: 'pain_killer',
     language: 'id',
     loading: false
   });
@@ -39,7 +40,6 @@ const App: React.FC = () => {
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>(AspectRatio.RATIO_9_16);
   const [apiError, setApiError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
 
   // Show toast notification
@@ -51,11 +51,7 @@ const App: React.FC = () => {
   // Save API Key to localStorage
   const saveApiKey = (key: string) => {
     localStorage.setItem('gemini_api_key', key);
-    setSaveStatus('saved');
     console.log('✅ API Key saved to localStorage:', key.substring(0, 8) + '...');
-    
-    // Show saved indicator briefly
-    setTimeout(() => setSaveStatus('idle'), 3000);
   };
 
   React.useEffect(() => {
@@ -122,6 +118,7 @@ const App: React.FC = () => {
     
     console.log('🚀 Starting createUGCPrompt...');
     console.log('📊 Analysis:', state.analysis);
+    console.log('🎭 Script Style:', state.scriptStyle);
     console.log('🔑 API Key:', state.apiKey.substring(0, 8) + '...');
     
     setState(prev => ({ ...prev, loading: true, error: undefined }));
@@ -132,6 +129,7 @@ const App: React.FC = () => {
         state.analysis,
         state.language,
         state.voiceStyle,
+        state.scriptStyle,
         state.campaignGoal,
         state.platform,
         state.duration,
@@ -206,6 +204,7 @@ const App: React.FC = () => {
       platform: 'tiktok',
       duration: '30s',
       voiceStyle: 'casual',
+      scriptStyle: 'pain_killer',
       language: 'id',
       loading: false,
       analysis: undefined,
@@ -323,30 +322,9 @@ const App: React.FC = () => {
                       <span className={`font-mono px-2 py-1 rounded bg-white/5 ${state.apiKey.trim().startsWith('AIza') ? 'text-green-500' : 'text-red-400'}`}>
                         {state.apiKey.substring(0, 8)}...{state.apiKey.substring(state.apiKey.length - 4)}
                       </span>
-                      {saveStatus === 'saved' && (
-                        <span className="text-xs text-green-400 flex items-center gap-1">
-                          <i className="fas fa-check"></i> Saved locally!
-                        </span>
-                      )}
-                      {saveStatus === 'error' && (
-                        <span className="text-xs text-red-400 flex items-center gap-1" title="Saved to localStorage only">
-                          <i className="fas fa-info-circle"></i> Local storage
-                        </span>
-                      )}
-                      <button
-                        onClick={() => {
-                          const confirmed = confirm(`Save API Key to .env file?\n\nKey: ${state.apiKey.substring(0, 8)}...${state.apiKey.substring(state.apiKey.length - 4)}\n\nThis will update the .env file so the key persists across browser sessions and can be shared with team members.`);
-                          if (confirmed) {
-                            // Copy to clipboard and show instructions
-                            navigator.clipboard.writeText(state.apiKey);
-                            alert(`✅ API Key copied to clipboard!\n\nNow run this command to save to .env:\n\nnode scripts/update-env.js\n\nOr manually paste into .env file:\nVITE_GEMINI_API_KEY=${state.apiKey}`);
-                          }
-                        }}
-                        className="text-xs bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 text-indigo-400 px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-2"
-                      >
-                        <i className="fas fa-floppy-disk"></i>
-                        Save to .env
-                      </button>
+                      <span className="text-xs text-green-400 flex items-center gap-1">
+                        <i className="fas fa-check-circle"></i> Saved locally
+                      </span>
                       <button
                         onClick={testApiKey}
                         disabled={connectionStatus === 'testing'}
@@ -425,6 +403,109 @@ const App: React.FC = () => {
                 <ul className="text-sm space-y-1">
                   {state.analysis.sellingPoints.slice(0, 3).map((s, i) => <li key={i} className="flex items-center gap-2"><i className="fas fa-check text-indigo-500 text-[10px]"></i> {s}</li>)}
                 </ul>
+              </div>
+            </div>
+
+            {/* Script Style Selector */}
+            <div className="glass p-8 rounded-3xl space-y-6">
+              <div>
+                <h3 className="text-xl font-bold flex items-center gap-3 mb-2">
+                  <span className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 text-sm">2</span>
+                  Choose Script Style
+                </h3>
+                <p className="text-sm text-slate-400 ml-11">Select the storytelling approach for your UGC script</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* The Pain Killer */}
+                <button
+                  onClick={() => setState(prev => ({ ...prev, scriptStyle: 'pain_killer' }))}
+                  className={`p-5 rounded-2xl border-2 text-left transition-all hover:scale-[1.02] ${
+                    state.scriptStyle === 'pain_killer'
+                      ? 'bg-indigo-600/20 border-indigo-500 shadow-lg shadow-indigo-500/20'
+                      : 'bg-slate-900/50 border-white/10 hover:border-white/20'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-2xl">💊</span>
+                    <span className="text-sm font-bold">The Pain Killer</span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    "Masalah [A] membuat saya stres, tapi [Produk] menyelamatkan saya."
+                  </p>
+                </button>
+
+                {/* The Skeptic Disarmer */}
+                <button
+                  onClick={() => setState(prev => ({ ...prev, scriptStyle: 'skeptic_disarmer' }))}
+                  className={`p-5 rounded-2xl border-2 text-left transition-all hover:scale-[1.02] ${
+                    state.scriptStyle === 'skeptic_disarmer'
+                      ? 'bg-indigo-600/20 border-indigo-500 shadow-lg shadow-indigo-500/20'
+                      : 'bg-slate-900/50 border-white/10 hover:border-white/20'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-2xl">🤔</span>
+                    <span className="text-sm font-bold">The Skeptic Disarmer</span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    "Saya belum pernah coba ini sebelumnya, percaya atau tidak..."
+                  </p>
+                </button>
+
+                {/* The Social Proof */}
+                <button
+                  onClick={() => setState(prev => ({ ...prev, scriptStyle: 'social_proof' }))}
+                  className={`p-5 rounded-2xl border-2 text-left transition-all hover:scale-[1.02] ${
+                    state.scriptStyle === 'social_proof'
+                      ? 'bg-indigo-600/20 border-indigo-500 shadow-lg shadow-indigo-500/20'
+                      : 'bg-slate-900/50 border-white/10 hover:border-white/20'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-2xl">👥</span>
+                    <span className="text-sm font-bold">The Social Proof</span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    "[Orang terdekat] saya baru pakai ini [X hari], dan hasilnya..."
+                  </p>
+                </button>
+
+                {/* The Bold Promise */}
+                <button
+                  onClick={() => setState(prev => ({ ...prev, scriptStyle: 'bold_promise' }))}
+                  className={`p-5 rounded-2xl border-2 text-left transition-all hover:scale-[1.02] ${
+                    state.scriptStyle === 'bold_promise'
+                      ? 'bg-indigo-600/20 border-indigo-500 shadow-lg shadow-indigo-500/20'
+                      : 'bg-slate-900/50 border-white/10 hover:border-white/20'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-2xl">🎯</span>
+                    <span className="text-sm font-bold">The Bold Promise</span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    "Bagaimana jika saya katakan Anda bisa [Hasil Besar]? Ini buktinya."
+                  </p>
+                </button>
+
+                {/* The Redemption Story */}
+                <button
+                  onClick={() => setState(prev => ({ ...prev, scriptStyle: 'redemption_story' }))}
+                  className={`p-5 rounded-2xl border-2 text-left transition-all hover:scale-[1.02] md:col-span-2 lg:col-span-2 ${
+                    state.scriptStyle === 'redemption_story'
+                      ? 'bg-indigo-600/20 border-indigo-500 shadow-lg shadow-indigo-500/20'
+                      : 'bg-slate-900/50 border-white/10 hover:border-white/20'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-2xl">✨</span>
+                    <span className="text-sm font-bold">The Redemption Story</span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    "Saya sudah coba semua cara [Daftar Kegagalan], sampai saya temukan ini."
+                  </p>
+                </button>
               </div>
             </div>
 

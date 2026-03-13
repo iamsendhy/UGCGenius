@@ -1,6 +1,6 @@
 
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-import { ProductAnalysis, UGCPrompt, AspectRatio, VoiceStyle, CampaignGoal, TargetPlatform, VideoDuration } from "../types";
+import { ProductAnalysis, UGCPrompt, AspectRatio, VoiceStyle, CampaignGoal, TargetPlatform, VideoDuration, ScriptStyle } from "../types";
 
 const getAIClient = (apiKey: string) => {
   return new GoogleGenerativeAI(apiKey);
@@ -114,6 +114,7 @@ export const generateUGCPrompt = async (
   analysis: ProductAnalysis,
   language: 'en' | 'id',
   voiceStyle: VoiceStyle,
+  scriptStyle: ScriptStyle,
   goal: CampaignGoal,
   platform: TargetPlatform,
   duration: VideoDuration,
@@ -121,6 +122,15 @@ export const generateUGCPrompt = async (
 ): Promise<UGCPrompt> => {
   const genAI = getAIClient(apiKey);
   
+  // Script style descriptions
+  const styleDescriptions: Record<ScriptStyle, string> = {
+    pain_killer: 'The Pain Killer: "Masalah [A] membuat saya stres, tapi [Produk] menyelamatkan saya." - Focus pada masalah yang menyakitkan dan bagaimana produk menjadi solusi.',
+    skeptic_disarmer: 'The Skeptic Disarmer: "Saya belum pernah coba ini sebelumnya, percaya atau tidak..." - Pendekatan skeptis yang jujur untuk membangun kepercayaan.',
+    social_proof: 'The Social Proof: "[Orang terdekat] saya baru pakai ini [X hari], dan hasilnya..." - Gunakan testimoni dan bukti sosial.',
+    bold_promise: 'The Bold Promise: "Bagaimana jika saya katakan Anda bisa [Hasil Besar]? Ini buktinya." - Janji hasil yang berani dengan bukti.',
+    redemption_story: 'The Redemption Story: "Saya sudah coba semua cara [Daftar Kegagalan], sampai saya temukan ini." - Cerita perjalanan dari kegagalan ke kesuksesan.'
+  };
+
   // Coba model yang tersedia secara berurutan
   for (const modelName of TEXT_MODELS) {
     try {
@@ -162,12 +172,14 @@ export const generateUGCPrompt = async (
     - Duration: ${duration}
     - Voice Style: ${voiceStyle}
     - Language: ${langText} (Use slang/natural terms common in UGC if suitable)
+    - SCRIPT STYLE: ${scriptStyle.toUpperCase()} - ${styleDescriptions[scriptStyle]}
 
     INSTRUCTIONS:
-    1. Create a "Hook" that stops the scroll in the first 3 seconds.
-    2. The "Body" should focus on the ${goal} aspect using the ${analysis.viralAngle}.
-    3. The "CTA" should be direct and natural.
-    4. Provide exactly 4-6 scenes.`;
+    1. Create a "Hook" that stops the scroll in the first 3 seconds using the ${scriptStyle} approach.
+    2. The "Body" should follow the ${scriptStyle} formula while focusing on the ${goal} aspect.
+    3. The "CTA" should be direct and natural, matching the ${scriptStyle} tone.
+    4. Provide exactly 4-6 scenes.
+    5. Make it authentic, relatable, and scroll-stopping!`;
 
       const result = await model.generateContent(prompt);
       const response = await result.response;
